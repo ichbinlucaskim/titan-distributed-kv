@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package kvstore;
+
+option go_package = "titan-kv/proto/kvstore";
+
+// KeyValueStore service defines the main operations for the KV store
+service KeyValueStore {
+  // Put stores a key-value pair
+  rpc Put(PutRequest) returns (PutResponse);
+  
+  // Get retrieves a value by key
+  rpc Get(GetRequest) returns (GetResponse);
+  
+  // Delete removes a key-value pair
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+}
+
+// Replication service for node-to-node communication (for Phase 3)
+service Replication {
+  // ReplicateEntry replicates a log entry to a follower node
+  rpc ReplicateEntry(ReplicateEntryRequest) returns (ReplicateEntryResponse);
+  
+  // GetReplicationStatus returns the replication status of a node
+  rpc GetReplicationStatus(ReplicationStatusRequest) returns (ReplicationStatusResponse);
+}
+
+// PutRequest contains the key and value to store
+message PutRequest {
+  string key = 1;
+  bytes value = 2;
+}
+
+// PutResponse indicates success or failure of the PUT operation
+message PutResponse {
+  bool success = 1;
+  string error = 2; // Empty if success is true
+}
+
+// GetRequest contains the key to retrieve
+message GetRequest {
+  string key = 1;
+}
+
+// GetResponse contains the value if found, or an error
+message GetResponse {
+  bool found = 1;
+  bytes value = 2;
+  string error = 3; // Empty if found is true
+}
+
+// DeleteRequest contains the key to delete
+message DeleteRequest {
+  string key = 1;
+}
+
+// DeleteResponse indicates success or failure of the DELETE operation
+message DeleteResponse {
+  bool success = 1;
+  string error = 2; // Empty if success is true
+}
+
+// ReplicateEntryRequest contains a log entry to replicate
+message ReplicateEntryRequest {
+  uint64 term = 1;
+  uint64 index = 2;
+  string operation = 3; // "PUT" or "DELETE"
+  string key = 4;
+  bytes value = 5; // Empty for DELETE operations
+}
+
+// ReplicateEntryResponse indicates success or failure of replication
+message ReplicateEntryResponse {
+  bool success = 1;
+  string error = 2;
+  uint64 term = 3; // Current term of the follower
+}
+
+// ReplicationStatusRequest requests the replication status
+message ReplicationStatusRequest {
+  // Empty for now, can be extended later
+}
+
+// ReplicationStatusResponse contains the replication status
+message ReplicationStatusResponse {
+  uint64 term = 1;
+  uint64 last_log_index = 2;
+  bool is_leader = 3;
+}
+

@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+  node1:
+    build: .
+    container_name: titan-kv-node1
+    environment:
+      NODE_ID: node1
+      GRPC_ADDR: ":50051"
+      RAFT_ADDR: ":12000"
+      DATA_DIR: /data
+      BOOTSTRAP: "true"
+      PEERS: "node2|node2:50052|node2:12001,node3|node3:50053|node3:12002"
+    ports:
+      - "50051:50051"
+      - "12000:12000"
+    volumes:
+      - node1-data:/data
+    networks:
+      - titan-kv-net
+
+  node2:
+    build: .
+    container_name: titan-kv-node2
+    depends_on:
+      - node1
+    environment:
+      NODE_ID: node2
+      GRPC_ADDR: ":50052"
+      RAFT_ADDR: ":12001"
+      DATA_DIR: /data
+      BOOTSTRAP: "false"
+      PEERS: "node1|node1:50051|node1:12000,node3|node3:50053|node3:12002"
+      WAIT_FOR: "node1:50051"
+    ports:
+      - "50052:50052"
+      - "12001:12001"
+    volumes:
+      - node2-data:/data
+    networks:
+      - titan-kv-net
+
+  node3:
+    build: .
+    container_name: titan-kv-node3
+    depends_on:
+      - node1
+    environment:
+      NODE_ID: node3
+      GRPC_ADDR: ":50053"
+      RAFT_ADDR: ":12002"
+      DATA_DIR: /data
+      BOOTSTRAP: "false"
+      PEERS: "node1|node1:50051|node1:12000,node2|node2:50052|node2:12001"
+      WAIT_FOR: "node1:50051"
+    ports:
+      - "50053:50053"
+      - "12002:12002"
+    volumes:
+      - node3-data:/data
+    networks:
+      - titan-kv-net
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+
+networks:
+  titan-kv-net:
+    driver: bridge
+
