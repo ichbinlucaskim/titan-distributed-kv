@@ -1,271 +1,161 @@
 # Titan-KV: Distributed Key-Value Store
 
-A distributed key-value store implementation built in Go, progressing from a single-node Bitcask-style storage engine to a fully replicated and sharded distributed system.
+A production-grade distributed key-value store implementation in Go, demonstrating fundamental distributed systems principles through a multi-phase architecture: single-node storage engine, network communication layer, distributed consensus, and horizontal scalability.
 
-## Project Status
+## Overview
 
-### ✅ Phase 1: Core Storage Engine (Single Node) - COMPLETE
+Titan-KV implements a CP (Consistency + Partition-tolerance) distributed system using the Raft consensus algorithm for strong consistency guarantees. The system features:
 
-Phase 1 implements a Bitcask-inspired storage engine with the following features:
+- **Bitcask-inspired storage engine**: Append-only log with in-memory index for O(1) reads and writes
+- **Raft consensus**: Distributed replication with automatic leader election and fault tolerance
+- **Consistent hashing**: Horizontal scalability through sharding with minimal data movement
+- **gRPC communication**: Efficient binary protocol for inter-node and client-server communication
 
-- **Append-only log file**: All writes are appended to disk for durability
-- **In-memory hash map (keyDir)**: Maps keys to record locations (file ID, offset, size) in log files
-- **Garbage Collection**: Compaction mechanism to merge data files and reclaim disk space
-- **Durable operations**: PUT, GET, and DELETE operations with durability guarantees (fsync)
+For detailed architectural decisions and design trade-offs, see [DESIGN_GUIDE.md](./DESIGN_GUIDE.md).
 
-#### Architecture
+## Architecture
 
-- `storage/bitcask.go`: Core storage engine implementation
-- `storage/compaction.go`: Garbage collection and log compaction
-- `storage/api.go`: High-level API interface
-- `cmd/kv/main.go`: Example program demonstrating the storage engine
+Titan-KV follows a layered architecture:
 
-#### Key Features
-
-1. **Bitcask Data Structure & Persistence** (Step 1.1)
-   - In-memory hash map (`keyDir`) storing key → record location mappings
-   - Append-only log files (`data-{id}.log`) for persistence
-   - Automatic file rotation when files exceed size limits
-
-2. **Log-Structured Storage & Compaction** (Step 1.2)
-   - Periodic compaction merges multiple data files into one
-   - Removes deleted/overwritten keys to reclaim disk space
-   - Maintains data integrity during compaction
-
-3. **Basic Data Operations** (Step 1.3)
-   - `PUT`: Store key-value pairs with durability guarantee
-   - `GET`: Retrieve values by key
-   - `DELETE`: Remove keys (uses tombstone markers)
-
-#### Usage
-
-```bash
-# Run the example program
-go run cmd/kv/main.go
-
-# Or specify a custom data directory
-go run cmd/kv/main.go -data-dir ./my-data
+```
+┌─────────────────────────────────────────┐
+│         Client Applications             │
+└─────────────────┬───────────────────────┘
+                  │ gRPC
+┌─────────────────▼───────────────────────┐
+│      Sharding & Request Routing         │
+│    (Consistent Hashing Ring)            │
+└─────────────────┬───────────────────────┘
+                  │
+┌─────────────────▼───────────────────────┐
+│      Raft Consensus Layer               │
+│    (Leader Election & Log Replication)  │
+└─────────────────┬───────────────────────┘
+                  │
+┌─────────────────▼───────────────────────┐
+│      Storage Engine (Bitcask)           │
+│    (Append-Only Log + In-Memory Index)   │
+└─────────────────────────────────────────┘
 ```
 
-The example program demonstrates:
-- PUT operations (including updates)
-- GET operations
-- DELETE operations
-- Automatic background compaction every 5 minutes
+## Features
 
-### ✅ Phase 2: Communication and Protocol Layer (gRPC) - COMPLETE
+### Phase 1: Core Storage Engine
 
-Phase 2 adds network communication capabilities using gRPC, making the storage engine accessible over the network.
+**Status**: Complete
 
-#### Architecture
+Implements a Bitcask-inspired storage engine with the following characteristics:
 
+- **Append-only log**: All writes are sequential appends to disk for durability
+- **In-memory keyDir**: Hash map mapping keys to record locations (file ID, offset, size)
+- **Garbage collection**: Periodic compaction merges data files and reclaims disk space
+- **Durability guarantees**: PUT, GET, and DELETE operations with fsync for strong durability
+
+**Key Components**:
+- `storage/bitcask.go`: Core storage engine implementation
+- `storage/compaction.go`: Log compaction and garbage collection
+- `storage/api.go`: High-level storage API
+
+**Usage**:
+```bash
+go run cmd/kv/main.go -data-dir ./data
+```
+
+### Phase 2: Network Communication Layer
+
+**Status**: Complete
+
+Adds gRPC-based network communication using Protocol Buffers:
+
+- **Protocol Buffers**: Binary serialization for efficient network communication
+- **gRPC server**: Exposes storage engine APIs over the network
+- **gRPC client library**: Client SDK with timeout support and connection management
+- **CLI client**: Interactive command-line interface for testing
+
+**Key Components**:
 - `proto/kvstore.proto`: Protocol Buffer schema definition
-- `proto/kvstore/kvstore.pb.go`: Generated gRPC code
 - `server/server.go`: gRPC server implementation
 - `client/client.go`: gRPC client library
-- `cmd/server/main.go`: gRPC server executable
 - `cmd/cli/main.go`: CLI client tool
 
-#### Key Features
-
-1. **Protocol Buffers & Schema Definition** (Step 2.1)
-   - Defined protobuf schema for KV operations (PUT, GET, DELETE)
-   - Defined replication service for future Phase 3 implementation
-   - Generated Go code from protobuf definitions
-
-2. **Go gRPC Implementation** (Step 2.2)
-   - gRPC server exposing KV APIs from Phase 1
-   - gRPC client library with timeout support
-   - Graceful shutdown handling
-   - Error handling and validation
-
-3. **Client-Server Architecture** (Step 2.3)
-   - Interactive CLI client for testing
-   - Network connectivity testing
-   - Command-line interface for PUT, GET, DELETE operations
-
-#### Usage
-
-**Start the gRPC server:**
+**Usage**:
 ```bash
-# Run the server (default: :50051)
-go run cmd/server/main.go
+# Start server
+go run cmd/server/main.go -address :50051 -data-dir ./data
 
-# Or specify custom address and data directory
-go run cmd/server/main.go -address :8080 -data-dir ./server-data
+# Connect with CLI client
+go run cmd/cli/main.go -address localhost:50051
 ```
 
-**Use the CLI client:**
-```bash
-# Connect to default server (localhost:50051)
-go run cmd/cli/main.go
+**CLI Commands**:
+- `PUT <key> <value>`: Store a key-value pair
+- `GET <key>`: Retrieve a value by key
+- `DELETE <key>`: Delete a key-value pair
+- `QUIT`: Exit the client
 
-# Connect to custom server address
-go run cmd/cli/main.go -address localhost:8080
-```
+### Phase 3: Distributed Consensus and Replication
 
-**CLI Commands:**
-- `PUT <key> <value>` - Store a key-value pair
-- `GET <key>` - Retrieve a value by key
-- `DELETE <key>` - Delete a key-value pair
-- `QUIT` - Exit the client
+**Status**: Complete
 
-**Example Session:**
-```
-titan-kv> PUT user:1 Alice
-OK: Stored key 'user:1'
-titan-kv> GET user:1
-Value: Alice
-titan-kv> PUT user:1 Alice Updated
-OK: Stored key 'user:1'
-titan-kv> GET user:1
-Value: Alice Updated
-titan-kv> DELETE user:1
-OK: Deleted key 'user:1'
-titan-kv> QUIT
-Goodbye!
-```
+Integrates Raft consensus algorithm for distributed replication and fault tolerance:
 
-### ✅ Phase 3: Distributed Consensus and Replication (RAFT) - COMPLETE
+- **Raft consensus**: Leader election, log replication, and safety guarantees
+- **State machine replication**: All write operations committed via Raft before applying to storage
+- **Fault tolerance**: System tolerates (N-1)/2 node failures
+- **Automatic recovery**: Leader election and log replication handle node failures
 
-Phase 3 adds distributed consensus and replication using the RAFT algorithm, enabling fault tolerance and high availability.
-
-#### Architecture
-
+**Key Components**:
 - `raft/fsm.go`: Finite State Machine implementing `raft.FSM` interface
-- `raft/node.go`: RAFT node wrapper and cluster management
+- `raft/node.go`: Raft node wrapper and cluster management
 - `raft/join.go`: Cluster membership management
-- `server/raft_server.go`: gRPC server with RAFT integration
-- `scripts/start-cluster.sh`: Script to start a 3-node cluster
-- `scripts/stop-cluster.sh`: Script to stop all cluster nodes
+- `server/raft_server.go`: gRPC server with Raft integration
 
-#### Key Features
-
-1. **Consensus Algorithm (RAFT)** (Step 3.1)
-   - Integrated `hashicorp/raft` library
-   - RAFT node configuration and initialization
-   - Cluster bootstrap and node joining
-   - Persistent log store, stable store, and snapshot store
-
-2. **State Machine Replication** (Step 3.2)
-   - FSM that applies PUT/DELETE operations to storage engine
-   - All write requests committed via RAFT before applying to FSM
-   - Read operations served directly from local storage (no RAFT overhead)
-   - Snapshot support for efficient state recovery
-
-3. **Fault Tolerance & High Availability** (Step 3.3)
-   - Automatic leader election
-   - Log replication across cluster
-   - System remains available during leader failure
-   - Read requests can be served by any node
-   - Write requests automatically redirected to leader
-
-#### Usage
-
-**Start a single node (for testing):**
+**Usage**:
 ```bash
-# Start a bootstrap node
+# Start bootstrap node
 go run cmd/server/main.go \
   -node-id node1 \
   -grpc-addr :50051 \
   -raft-addr :12000 \
   -data-dir ./data/node1 \
   -bootstrap
+
+# Start additional nodes
+go run cmd/server/main.go \
+  -node-id node2 \
+  -grpc-addr :50052 \
+  -raft-addr :12001 \
+  -data-dir ./data/node2
 ```
 
-**Start a 3-node cluster:**
-```bash
-# Start all 3 nodes
-./scripts/start-cluster.sh
+**Cluster Behavior**:
+- Write operations (PUT/DELETE) must go through the leader
+- Read operations (GET) can be served by any node
+- Automatic leader election on leader failure
+- Data replication across all nodes via Raft log
 
-# Stop all nodes
-./scripts/stop-cluster.sh
-```
+### Phase 4: Horizontal Scalability (Sharding)
 
-**Manual cluster setup:**
-```bash
-# Terminal 1: Start Node 1 (Bootstrap)
-go run cmd/server/main.go -node-id node1 -grpc-addr :50051 -raft-addr :12000 -data-dir ./data/node1 -bootstrap
+**Status**: Complete
 
-# Terminal 2: Start Node 2
-go run cmd/server/main.go -node-id node2 -grpc-addr :50052 -raft-addr :12001 -data-dir ./data/node2
+Implements sharding using consistent hashing for horizontal scalability:
 
-# Terminal 3: Start Node 3
-go run cmd/server/main.go -node-id node3 -grpc-addr :50053 -raft-addr :12002 -data-dir ./data/node3
-```
+- **Consistent hashing ring**: SHA-256-based hash ring with virtual nodes (150 per physical node)
+- **Decentralized routing**: Any node can receive requests and route to the correct shard
+- **Request forwarding**: Automatic forwarding when request arrives at wrong shard
+- **Read repair**: Background process repairs inconsistencies across replicas
 
-**Test the cluster:**
-```bash
-# Connect to any node (reads work on all nodes)
-go run cmd/cli/main.go -address localhost:50051
-
-# Writes will be redirected to leader if not connected to leader
-titan-kv> PUT mykey "Hello from cluster"
-OK: Stored key 'mykey'
-titan-kv> GET mykey
-Value: Hello from cluster
-```
-
-#### Cluster Behavior
-
-- **Leader Election**: RAFT automatically elects a leader when cluster starts
-- **Write Operations**: PUT/DELETE operations must go through the leader
-- **Read Operations**: GET operations can be served by any node
-- **Fault Tolerance**: Cluster can tolerate (N-1)/2 node failures (for 3 nodes, 1 failure is tolerated)
-- **Data Replication**: All writes are replicated to all nodes via RAFT log
-- **Automatic Recovery**: If leader fails, a new leader is automatically elected
-
-### ✅ Phase 4: Data Distribution and Scalability (Sharding) - COMPLETE
-
-Phase 4 implements sharding (partitioning) across the cluster using consistent hashing, enabling horizontal scalability and distributed data storage.
-
-#### Architecture
-
+**Key Components**:
 - `sharding/ring.go`: Consistent hashing ring implementation
-- `sharding/membership.go`: Cluster membership service and node tracking
+- `sharding/membership.go`: Cluster membership service
 - `server/sharded_server.go`: Sharded gRPC server with request routing
-- `scripts/start-sharded-cluster.sh`: Script to start a sharded cluster
 
-#### Key Features
-
-1. **Consistent Hashing & Partitioning** (Step 4.1)
-   - Consistent hashing ring with virtual nodes (150 replicas per node)
-   - SHA-256 hash function for key-to-node mapping
-   - Automatic key distribution across shards
-   - Support for multiple replicas per key
-
-2. **Decentralized Request Routing** (Step 4.2)
-   - Any node can receive client requests
-   - Automatic determination of target shard using hash ring
-   - Request forwarding to correct shard if needed
-   - Transparent routing - clients don't need to know shard locations
-
-3. **Sharding Implementation** (Step 4.3)
-   - GET requests: Routed to correct shard, served from local storage
-   - PUT/DELETE requests: Routed to correct shard, committed via RAFT
-   - Automatic forwarding when request arrives at wrong shard
-   - Each shard maintains its own RAFT cluster for replication
-
-4. **Dynamo-style Conflict Resolution** (Step 4.4)
-   - Read repair: Automatically repairs missing keys on replicas
-   - Value comparison: Detects and logs value conflicts
-   - Background repair: Runs asynchronously after reads
-   - Configurable replication factor for read repair
-
-#### Usage
-
-**Start a sharded cluster:**
+**Usage**:
 ```bash
-# Start all 3 nodes with sharding enabled
+# Start sharded cluster
 ./scripts/start-sharded-cluster.sh
 
-# Stop all nodes
-./scripts/stop-cluster.sh
-```
-
-**Manual sharded cluster setup:**
-```bash
-# Terminal 1: Start Node 1 (Bootstrap)
+# Or manually start nodes with peer configuration
 go run cmd/server/main.go \
   -node-id node1 \
   -grpc-addr localhost:50051 \
@@ -273,133 +163,146 @@ go run cmd/server/main.go \
   -data-dir ./data/node1 \
   -bootstrap \
   -peers "node2|localhost:50052|localhost:12001,node3|localhost:50053|localhost:12002"
-
-# Terminal 2: Start Node 2
-go run cmd/server/main.go \
-  -node-id node2 \
-  -grpc-addr localhost:50052 \
-  -raft-addr localhost:12001 \
-  -data-dir ./data/node2 \
-  -peers "node1|localhost:50051|localhost:12000,node3|localhost:50053|localhost:12002"
-
-# Terminal 3: Start Node 3
-go run cmd/server/main.go \
-  -node-id node3 \
-  -grpc-addr localhost:50053 \
-  -raft-addr localhost:12002 \
-  -data-dir ./data/node3 \
-  -peers "node1|localhost:50051|localhost:12000,node2|localhost:50052|localhost:12001"
 ```
 
-**Test sharding:**
-```bash
-# Connect to any node
-go run cmd/cli/main.go -address localhost:50051
-
-# Keys are automatically sharded across nodes
-titan-kv> PUT user:1 "Alice"
-OK: Stored key 'user:1'
-titan-kv> PUT user:2 "Bob"
-OK: Stored key 'user:2'
-titan-kv> PUT product:1 "Widget"
-OK: Stored key 'product:1'
-
-# Reads work from any node (will forward if needed)
-titan-kv> GET user:1
-Value: Alice
-```
-
-#### How Sharding Works
-
-1. **Key Routing**: When a request arrives, the node computes the hash of the key
-2. **Shard Determination**: Hash ring determines which node owns the key
-3. **Request Handling**:
-   - If local node owns the key: Process directly (write via RAFT, read from storage)
-   - If remote node owns the key: Forward request to that node
-4. **Read Repair**: After successful reads, background process checks replicas and repairs inconsistencies
-
-#### Benefits
-
-- **Horizontal Scalability**: Add more nodes to increase capacity
-- **Load Distribution**: Keys distributed evenly across nodes
-- **Fault Tolerance**: Each shard replicated via RAFT
-- **Transparent Routing**: Clients don't need to know shard locations
-- **Automatic Rebalancing**: Consistent hashing minimizes key movement when nodes join/leave
+**Sharding Behavior**:
+1. Key hash determines target shard using consistent hashing ring
+2. Request routed to target shard (local processing or forwarding)
+3. Write operations committed via Raft within the shard
+4. Read operations served from local storage with optional read repair
 
 ## Project Structure
 
 ```
 titan-distributed-kv/
-├── storage/          # Core storage engine (Phase 1)
-│   ├── bitcask.go   # Bitcask implementation
-│   ├── compaction.go # Garbage collection
-│   └── api.go       # High-level API
-├── proto/            # Protocol Buffers (Phase 2)
-│   ├── kvstore.proto # Protobuf schema
-│   └── kvstore/      # Generated code
+├── storage/              # Core storage engine
+│   ├── bitcask.go       # Bitcask implementation
+│   ├── compaction.go    # Garbage collection
+│   └── api.go           # High-level API
+├── proto/                # Protocol Buffers
+│   ├── kvstore.proto    # Protobuf schema
+│   └── kvstore/          # Generated code
 │       └── kvstore.pb.go
-├── server/           # gRPC server (Phase 2)
-│   └── server.go
-├── client/           # gRPC client library (Phase 2)
+├── server/               # gRPC server implementations
+│   ├── server.go        # Basic gRPC server
+│   ├── raft_server.go   # Raft-enabled server
+│   └── sharded_server.go # Sharded server
+├── client/               # gRPC client library
 │   └── client.go
-├── raft/            # RAFT consensus (Phase 3)
-│   ├── fsm.go      # Finite State Machine
-│   ├── node.go     # RAFT node wrapper
-│   └── join.go     # Cluster membership
-├── sharding/        # Sharding and consistent hashing (Phase 4)
-│   ├── ring.go     # Consistent hashing ring
-│   └── membership.go # Cluster membership service
+├── raft/                 # Raft consensus layer
+│   ├── fsm.go           # Finite State Machine
+│   ├── node.go          # Raft node wrapper
+│   └── join.go          # Cluster membership
+├── sharding/             # Sharding layer
+│   ├── ring.go          # Consistent hashing ring
+│   └── membership.go    # Cluster membership service
 ├── cmd/
-│   ├── kv/          # Example program (Phase 1)
+│   ├── kv/              # Example program
 │   │   └── main.go
-│   ├── server/      # gRPC server executable (Phase 2/3)
+│   ├── server/          # Server executable
 │   │   └── main.go
-│   └── cli/         # CLI client (Phase 2)
+│   └── cli/             # CLI client
 │       └── main.go
-├── scripts/         # Cluster management scripts
-│   ├── start-cluster.sh        # Start non-sharded cluster (Phase 3)
-│   ├── start-sharded-cluster.sh # Start sharded cluster (Phase 4)
+├── scripts/              # Cluster management scripts
+│   ├── start-cluster.sh
+│   ├── start-sharded-cluster.sh
 │   └── stop-cluster.sh
+├── tests/                # Integration tests
+│   └── integration_test.go
 ├── doc/
-│   └── Prompt-log.md # Project plan and phases
-├── Makefile          # Build automation
+│   └── Prompt-log.md    # Project plan
+├── DESIGN_GUIDE.md      # Architectural deep dive
+├── Makefile             # Build automation
 └── README.md
 ```
 
 ## Requirements
 
 - Go 1.21 or later
-- Protocol Buffer compiler (`protoc`) - optional, generated code is included
-- gRPC Go plugins - optional, generated code is included
-- `hashicorp/raft` and `hashicorp/raft-boltdb` - included in go.mod
+- Protocol Buffer compiler (`protoc`) - optional, generated code included
+- gRPC Go plugins - optional, generated code included
+
+Dependencies are managed via `go.mod`:
+- `github.com/hashicorp/raft`: Raft consensus library
+- `github.com/hashicorp/raft-boltdb/v2`: Persistent Raft log storage
+- `google.golang.org/grpc`: gRPC framework
+- `google.golang.org/protobuf`: Protocol Buffers
 
 ## Building
 
-**Install dependencies:**
+Install dependencies:
 ```bash
 go mod download
 go mod tidy
 ```
 
-**Build binaries:**
+Build binaries:
 ```bash
-# Build everything
-make build
-
-# Or build individually
-make server  # Build server only
-make cli     # Build CLI client only
+make build        # Build all binaries
+make server       # Build server only
+make cli          # Build CLI client only
 ```
 
-**Regenerate protobuf code (if needed):**
+Regenerate Protocol Buffer code (if schema changes):
 ```bash
 make proto
 ```
 
-The binaries will be created in the `bin/` directory:
-- `bin/server` - gRPC server
-- `bin/cli` - CLI client
+Binaries are created in the `bin/` directory:
+- `bin/server`: gRPC server executable
+- `bin/cli`: CLI client executable
+
+## Testing
+
+Run integration tests:
+```bash
+go test ./tests/... -v
+```
+
+Integration tests verify:
+- Basic write and read operations with replication
+- Leader failure and data persistence
+- Multiple writes across cluster nodes
+
+## System Characteristics
+
+### Consistency Model
+
+Titan-KV provides **linearizable consistency**:
+- All write operations are committed via Raft consensus
+- Reads may be served from any node (may see slightly stale data)
+- Strong consistency guarantees for writes
+
+### CAP Theorem
+
+Titan-KV is a **CP system** (Consistency + Partition-tolerance):
+- Prioritizes consistency over availability during network partitions
+- Minority partitions become unavailable to prevent split-brain scenarios
+- Majority partitions continue operating normally
+
+### Fault Tolerance
+
+- Tolerates (N-1)/2 node failures in a cluster of N nodes
+- Automatic leader election on leader failure
+- Data replication across all nodes via Raft log
+- Persistent storage ensures data durability
+
+### Scalability
+
+- Horizontal scalability through sharding
+- Consistent hashing minimizes data movement on node addition/removal
+- Each shard operates independently with its own Raft cluster
+- Virtual nodes ensure even load distribution
+
+## Documentation
+
+- [DESIGN_GUIDE.md](./DESIGN_GUIDE.md): Comprehensive architectural guide covering:
+  - Raft consensus algorithm deep dive
+  - Storage engine internals and trade-offs
+  - Consistent hashing and sharding strategies
+  - Design trade-offs and system characteristics
+  - Code map and implementation details
 
 ## License
 
-MIT
+MIT License
